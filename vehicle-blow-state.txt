@@ -1,0 +1,297 @@
+--------------------------------------------------------------------------------
+SERVER SIDE
+--------------------------------------------------------------------------------
+
+> CStaticFunctionDefinitions::BlowVehicle
+
+    function blowVehicle(vehicle [, withExplosion = true ])
+        if vehicle is blown or being deleted then
+            abort
+        end
+
+        if withExplosion then
+            -- vehicle awaits explosion sync from any client
+            vehicle->blowState = AWAITING_EXPLOSION_SYNC
+        else
+            -- vehicle is already blown (no explosion)
+            vehicle->blowState = BLOWN
+        end
+
+        TRIGGER "onVehicleExplode"
+            - withExplosion
+
+        if vehicle is not blown or being deleted then
+            abort
+        end
+
+        vehicle->health = 0
+        vehicle->isEngineOn = false
+
+        REMOTE-CALL "BLOW_VEHICLE"
+
+
+> CGame::Packet_ExplosionSync
+
+    CExplosionSyncPacket processing logic for server.
+
+    Every client may send an explosion sync packet anytime with CClientGame::SendExplosionSync.
+
+    The server is going to relay the explosion sync packet to every player in range.
+
+    A player is in range when the distance between explosion location and the player's camera
+    position is equal to or below MAX_EXPLOSION_SYNC_DISTANCE.
+
+    If the origin element is a vehicle, then it was caused by a vehicle explosion, which now
+    means that the vehicle was blown.
+
+    If the vehicle wasn't blown prior to the processing of the explosion sync packet,
+    then the vehicle is set to blown state and the event "onVehicleExplode" is triggered.
+
+    OLD BEHAVIOR:
+    -------------
+        The event "onVehicleExplode" may be triggerd a second time, because the vehicle wasn't
+        marked as blown by `CStaticFunctionDefinitions::BlowVehicle` when `withExplosion` was
+        set to false.
+
+        The explosion sync packet will be broadcasted if the vehicle wasn't blown before.
+
+    NEW BEHAVIOR:
+    -------------
+        The event "onVehicleExplode" will be triggered only if the vehicle was intact.
+    
+        The explosion sync packet will be broadcasted if the vehicle is blown and not being
+        deleted after the current frame.
+
+        The packet may include an option to blow the vehicle without an explosion, which would
+        prevent receiving clients from sending another to-be-discarded explosion sync packet,
+        when they blow up the vehicle.
+
+
+CExplosionSyncPacket
+
+    Packet for explosion synchronisation.
+
+    A source entity is the client the explosion sync came from.
+
+    An origin entity is the entity responsible for the explosion.
+
+    CExplosionSyncPacket::Read
+
+        OLD BITSTREAM:
+        --------------
+            1 bit           - includes origin entity id
+            |   17 bits     - origin entity id
+            24 bits         - position x
+            24 bits         - position y
+            24 bits         - position z
+            4 bits          - explosion type
+
+        NEW BITSTREAM:
+        --------------
+            1 bit           - includes origin entity id
+            |   17 bits     - origin entity id
+            |   1 bit       - is origin a vehicle
+            |   |   1 bit   - vehicle blown without explosion
+            24 bits         - position x
+            24 bits         - position y
+            24 bits         - position z
+            4 bits          - explosion type
+
+    CExplosionSyncPacket::Write
+
+        OLD BITSTREAM:
+        --------------
+            1 bit           - includes source entity id
+            |   17 bits     - source entity id
+            |   16 bits     - source entity ping (compressed)
+            1 bit           - includes origin entity id
+            |   17 bits     - origin entity id
+            24 bits         - position x
+            24 bits         - position y
+            24 bits         - position z
+            4 bits          - explosion type
+
+        NEW BITSTREAM:
+        --------------
+            1 bit           - includes source entity id
+            |   17 bits     - source entity id
+            |   16 bits     - source entity ping (compressed)
+            1 bit           - includes origin entity id
+            |   17 bits     - origin entity id
+            |   1 bit       - is origin a vehicle
+            |   |   1 bit   - vehicle blown without explosion
+            24 bits         - position x
+            24 bits         - position y
+            24 bits         - position z
+            4 bits          - explosion type
+
+
+CEntityAddPacket
+
+    Packet for entity synchronisation.
+
+    Only the surrounding bitstream parts are shown below.
+
+    The changed parts only affect entities of type vehicle.
+
+    CEntityAddPacket::Write
+
+        OLD BITSTREAM:
+        --------------
+            8 bits      - vehicle model (-= 400)
+            12 bits     - vehicle health
+            2 bits      - vehicle color count
+
+        NEW BITSTREAM:
+        --------------
+            8 bits      - vehicle model (-= 400)
+            2 bits      - vehicle blow state
+            12 bits     - vehicle health
+            2 bits      - vehicle color count
+
+--------------------------------------------------------------------------------
+CLIENT SIDE
+--------------------------------------------------------------------------------
+
+CStaticFunctionDefinitions::BlowVehicle
+
+    function blowVehicle(vehicle [, withExplosion = true ])
+        vehicle->Blow(flags)
+            - withMovement = true
+            - withExplosion = withExplosion
+
+
+"BLOW_VEHICLE" @ CVehicleRPCs::BlowVehicle
+
+    This remote procedure call comes only from the server-side blowVehicle Lua function.
+
+    Reads and applies the sync time context from the bitstream and blows the vehicle.
+
+    OLD BEHAVIOR:
+    -------------
+        Vehicle is always blown with an explosion and with enabled movement.
+
+    NEW BEHAVIOR:
+    -------------
+        Vehicle is optionally blown with an explosion, if supported by the bistream, and
+        with enabled movement.
+
+        By default, if the bitstream doesn't support the optional explosion, the explosion
+        will occur.
+
+    OLD BITSTREAM:
+    --------------
+        1 byte - time context for synchronisation
+
+    NEW BITSTREAM:
+    --------------
+        1 byte  - time context for synchronisation
+        1 bit   - blow vehicle with explosion (1 = with, 0 = without)
+
+
+CClientVehicle::Blow
+
+    This function is responsible for blowing up a game vehicle, if it exists in the game world.
+
+    The vehicle must be marked as damageable before blowing it up, because the game code checks
+    the damage-proof flag on the entity.
+
+    The vehicle's movement vectors will be reapplied after the blow, if desired.
+
+    Before the vehicle is blown, the health is set to zero and dynamic vehicle components are
+    blown off (e.g., tyres and doors).
+
+    Blowing up a vehicle will always trigger an explosion and the explosion will be catched by
+    the explosion creation hook.
+
+
+CClientExplosionManager::Hook_ExplosionCreation
+
+    If the entity is client-side only or if the entity is a breakable object (i.e. a barrel),
+    then the explosion won't be relayed to the server.
+
+    A client-side only explosion will trigger the "onClientExplosion" event, which is cancellable.
+
+    An exploding client-side vehicle will be marked as blown and may prevent the explosion, if the
+    vehicle was already blown.
+
+    Only explosions caused by the player, his currently driven vehicle or by any unoccupied vehicle,
+    that's currently being synced by our client, will be forwarded to the server.
+
+    A syncable explosion will be sent to the server with CClientGame::SendExplosionSync.
+
+
+CClientGame::SendExplosionSync
+
+    This function creates a bitstream with id PACKET_ID_EXPLOSION to sync explosions with
+    the server.
+
+    A responsible entity may be provided, which will be used to transform the absolute
+    explosion position to a position relative to the responsible entity.
+
+    OLD BEHAVIOR:
+    -------------
+        If the responsible entity is a vehicle, it will be blown with an explosion everytime,
+        when the packet is relayed back to the client.
+
+    NEW BEHAVIOR:
+    -------------
+        If the responsible entity is a vehicle, it may be optionally blown with an explosion,
+        when the packet is relayed back to the client.
+
+    Bistream must be built according to the consumption by CExplosionSyncPacket::Read on server.
+
+
+CPacketHandler::Packet_ExplosionSync
+
+    CExplosionSyncPacket processing logic for client.
+
+    This functions reads the information from the explosion sync packet according to the write
+    format from CExplosionSyncPacket::Write on server.
+
+    If the packet includes an origin entity, the transmitted explosion position is relative and
+    must be added to the origin entity's current position.
+
+    If the packet includes no origin entity, the local player (or his vehicle if he occupies one)
+    must be warped to the interpolated position he was at when the explosion occurred.
+
+    If the explosion creator isn't our client and the dimension doesn't match, the explosion must
+    be cancelled.
+
+    If the explosion wasn't cancelled yet, the event "onClientExplosion" must be triggered with
+    the creator as the source element and root element if there is no creator entity provided.
+
+    If the origin entity is a vehicle, then the vehicle must be blown without movement and
+    the event "onClientVehicleExplode" must be triggered.
+
+    NEW BEHAVIOR:
+    -------------
+        If the origin entity is a vehicle, then the explosion may be cancelled, if supported by the
+        bitstream.
+
+    If the explosion wasn't cancelled so far, then it will be created now.
+
+
+CPacketHandler::Packet_EntityAdd
+
+    CEntityAddPacket processing logic for client.
+
+    This function reads a list of entities to be added to the world.
+
+    This functions reads the information from the entity add packet according to the write
+    format from CEntityAddPacket::Write on server.
+
+    OLD BEHAVIOR:
+    -------------
+        If the entity is a vehicle with health equal to or below zero, then the vehicle
+        will be blown with an explosion on the first streamed-in pulse.
+
+    NEW BEHAVIOR:
+    -------------
+        If the added entity is a vehicle and the bitstream supports vehicle blow type,
+        then the vehicle will be blown according to the provided type on the first
+        streamed-in pulse.
+
+        If the server doesn't support vehicle blow type and the entity is a vehicle with
+        health equal to or below zero, then the vehicle will be blown with an explosion
+        on the first streamed-in pulse.
