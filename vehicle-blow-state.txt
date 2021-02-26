@@ -1,4 +1,16 @@
 --------------------------------------------------------------------------------
+SUMMARY
+--------------------------------------------------------------------------------
+
+- Vehicles are always blown on clients
+
+- Non-local entity explosions on client are always intercepted and sent to the server
+
+- Server relays explosions for sync to every client
+
+- A server relayed explosion is the actual vehicle explosion
+
+--------------------------------------------------------------------------------
 SERVER SIDE
 --------------------------------------------------------------------------------
 
