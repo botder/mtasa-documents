@@ -2,7 +2,7 @@
 SERVER SIDE
 --------------------------------------------------------------------------------
 
-> CStaticFunctionDefinitions::BlowVehicle
+CStaticFunctionDefinitions::BlowVehicle
 
     function blowVehicle(vehicle [, withExplosion = true ])
         if vehicle is blown or being deleted then
@@ -30,7 +30,7 @@ SERVER SIDE
         REMOTE-CALL "BLOW_VEHICLE"
 
 
-> CGame::Packet_ExplosionSync
+CGame::Packet_ExplosionSync
 
     CExplosionSyncPacket processing logic for server.
 
