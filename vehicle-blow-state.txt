@@ -3,10 +3,14 @@ SUMMARY
 --------------------------------------------------------------------------------
 
 - Vehicles are always blown on clients
+  (can't be done on the server because the explosion position is not located at vehicle origin and thus
+   we let clients figure out the correct position for us)
 
 - Non-local entity explosions on client are always intercepted and sent to the server
+  (these entities are: the local player, his occupied vehicle or any unoccupied vehicle synced by the client)
 
 - Server relays explosions for sync to every client
+  (to every client in a certain radius around the explosion position)
 
 - A server relayed explosion is the actual vehicle explosion
 
