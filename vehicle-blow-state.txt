@@ -80,7 +80,7 @@ CGame::Packet_ExplosionSync
 
         The packet may include an option to blow the vehicle without an explosion, which would
         prevent receiving clients from sending another to-be-discarded explosion sync packet,
-        when they blow up the vehicle.
+        when they blow up the vehicle (if they are syncing it in any way).
 
 
 CExplosionSyncPacket
