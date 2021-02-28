@@ -161,8 +161,8 @@ CEntityAddPacket
         NEW BITSTREAM:
         --------------
             8 bits      - vehicle model (-= 400)
-            2 bits      - vehicle blow state
             12 bits     - vehicle health
+            2 bits      - vehicle blow state
             2 bits      - vehicle color count
 
 --------------------------------------------------------------------------------
